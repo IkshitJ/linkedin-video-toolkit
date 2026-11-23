@@ -135,5 +135,8 @@ class Safari:
         raise PostError(last.upper() if last and len(last) < 40 else "A STEP FAILED",
                         "the Safari window must be on screen with LinkedIn in English, and macOS in English")
 
+    def wait_for_post(self):
+        return 0   # Safari is your own window: it stays open with the post in it
+
     def close(self):
         pass

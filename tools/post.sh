@@ -23,10 +23,12 @@ set w to window 1
 set current tab of w to (first tab of w whose URL contains "linkedin.com")
 set URL of current tab of w to "https://www.linkedin.com/feed/"
 end tell' || { echo "NO LINKEDIN TAB: open linkedin.com in the front Safari window and sign in first"; exit 1; }
-sleep 8
-$PY tools/ax.py press "Start a post" AXButton 0 || exit 1
+# Press a button as soon as the page shows it, for up to about a minute (a feed can take a while to load).
+press() { for i in $(seq 1 20); do $PY tools/ax.py press "$@" 2>/dev/null && return 0; sleep 3; done; echo "no match: $1"; return 1; }
 sleep 4
-$PY tools/ax.py press "Media" AXPopUpButton 0 || exit 1
+press "Start a post" AXButton 0 || exit 1
+sleep 3
+press "Media" AXPopUpButton 0 || exit 1
 sleep 3
 ok=0
 for try in 1 2 3; do
@@ -47,7 +49,7 @@ done
 att=0
 for i in $(seq 1 20); do $PY tools/ax.py find "video 0" AXButton | grep -q "video 0" && { att=1; break; }; sleep 6; done
 [ $att = 1 ] || { echo "VIDEO NOT ATTACHED"; exit 1; }
-$PY tools/ax.py press "Next" AXButton 0
+press "Next" AXButton 0 || exit 1
 sleep 4
 $PY tools/fill.py "$TEXT" | head -2
 # The text in the editor must match the file exactly before anything is published.

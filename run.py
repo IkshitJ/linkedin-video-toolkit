@@ -4,17 +4,24 @@
     python run.py                      the whole thing, step by step
     python run.py --browser edge       another browser than your default one: safari (macOS), chrome, edge,
                                        firefox, chromium, or the path of a browser
-    python run.py --repo owner/name    skip the question about which repository
     python run.py --list               check the sign-ins, list your repositories and stop
-    python run.py --no-post            make the video and the text, do not publish
-    python run.py --dry-run            fill in the LinkedIn post but stop before pressing Post
-    python run.py --post VIDEO TEXT    publish a video and a text file you already have
+    python run.py --repo owner/name    skip the question about which repository
+    python run.py --basic              the simple template video, without AI
+    python run.py --no-post            make the video and the text, do not open LinkedIn
+    python run.py --post VIDEO TEXT    put a video and a text file you already have into a LinkedIn post
+    python run.py --post-with chrome   the browser that fills in the LinkedIn post (asked once if your default is Safari)
+    python run.py --press-post         also press Post, instead of leaving that to you
     python run.py --setup              install everything and stop
 
 What happens: (1) the first run installs what it needs, (2) your default browser is checked for a
-GitHub and a LinkedIn sign-in, and it waits while you sign in if there is none, (3) you pick
-one of your repositories, (4) a narrated video and a post text are made from its description, README,
-languages and stars, (5) you read the text, and it is published only when you answer yes.
+GitHub and a LinkedIn sign-in, and it waits while you sign in if there is none, (3) you pick one of
+your repositories; nothing is made before that, (4) footage of the product is collected and an AI
+writes the video and the post around it, (5) LinkedIn is opened, the video is attached and the caption
+is written, and it stops there: you look it over and press Post yourself.
+
+Who writes the video: in a terminal, Claude through the API, with your own API key (asked for once;
+ANTHROPIC_API_KEY or .env also work). When a coding agent runs this, the agent writes it:
+`--repo X --brief` collects the material and `--story FILE` builds the agent's storyboard. See AGENTS.md.
 
 Works on Windows, macOS and Linux. Needs Python 3.12 or newer, or uv (https://docs.astral.sh/uv/).
 """
@@ -135,100 +142,212 @@ def pick_repo(repos):
         print("That is not one of the numbers above.")
 
 
-def publish(session, video, text_file, dry_run):
-    """Post and report. -> exit code: 0 posted (or dry run), 1 nothing posted, 2 limit, 3 unconfirmed."""
+def publish(session, video, text_file, press):
+    """Open LinkedIn, attach the video and write the caption. Unless `press` (--press-post), stop there:
+    the person presses Post themselves. -> exit code: 0 ready or posted, 1 a step failed, 2 limit, 3 unconfirmed."""
     from toolkit import linkedin
-    print("\nPosting to LinkedIn through %s (one to three minutes)..." % session.label, flush=True)
+    print("\nOpening LinkedIn in %s and filling in the post (one to three minutes)..." % session.label, flush=True)
     try:
-        result = session.post(video, text_file, publish=not dry_run)
+        result = session.post(video, text_file, publish=press)
     except linkedin.PostError as err:
         print("\n%s%s" % (err.code, ": " + err.hint if err.hint else ""))
         if not err.posted:
             print("Nothing was published. If a half-finished post is open in %s, close it before trying again." % session.label)
         return 3 if err.posted else 2 if err.code == "LIMIT REACHED" else 1
     if result == "DRY RUN":
-        print("\nDRY RUN: the post is filled in and ready in %s. Post was NOT pressed." % session.label)
-        if sys.stdin.isatty() and session.own_profile:
-            ask("Look at it, then press Enter here to close the browser (the draft is discarded). ")
-        elif not session.own_profile:
-            print("Look at it in %s, then close the post there (Discard)." % session.label)
-        return 0
+        print("\nREADY: the video and the caption are in a LinkedIn post in %s. Nothing is published yet.\n"
+              "Look it over there, change the text if you like, and press Post yourself. To drop it, close the post and choose Discard." % session.label)
+        return session.wait_for_post()
     print("\nPOSTED: your post is live on LinkedIn.")
     return 0
 
 
-def flow(args):
-    from toolkit import browser, github, linkedin, story
+def poster_session(args, reader=None):
+    """The browser that fills in the LinkedIn post: `reader` itself when it is the same browser, a new session
+    otherwise, or None when the user has to be asked first and nobody is at the terminal."""
+    from toolkit import browser
+    choice = browser.poster_choice(args.post_with, args.browser, ask if sys.stdin.isatty() else None)
+    if choice is None:
+        return None
+    if reader is not None and ((choice.lower() == "safari" and not reader.own_profile) or
+                               (choice.lower() != "safari" and reader.own_profile and not args.post_with)):
+        return reader   # the browser that is already open
+    poster = browser.open_session(choice)
+    if poster.own_profile:
+        print("LinkedIn post in: %s, in its own window (you can keep working)" % poster.label, flush=True)
+    return poster
+
+
+def hand_over(args, video, text_file):
+    """Open LinkedIn in the chosen browser and fill in the post. -> exit code"""
+    from toolkit import browser, linkedin
+    poster = poster_session(args)
+    if poster is None:
+        print("\nLinkedIn was not opened yet. " + browser.POSTER_HELP + "\n  python run.py --post %s %s --post-with NAME"
+              % (os.path.relpath(str(video)), os.path.relpath(str(text_file))))
+        return 4
+    try:
+        linkedin.ensure_signed_in(poster)
+        return publish(poster, video, text_file, args.press_post)
+    finally:
+        poster.close()
+
+
+def api_key():
+    """An Anthropic API key from the environment or .env, else asked for in a terminal. '' means: no AI."""
+    key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    env = ROOT / ".env"
+    if not key and env.exists():
+        for line in env.read_text(encoding="utf-8").splitlines():
+            name, _, value = line.partition("=")
+            if name.strip() == "ANTHROPIC_API_KEY":
+                key = value.strip().strip("\"'")
+    if key or not sys.stdin.isatty():
+        return key
+    import getpass
+    print("\nClaude can write the video and the post from the repository and its footage. That needs an Anthropic API key\n"
+          "(create one at https://console.anthropic.com/settings/keys). It is sent only to Anthropic's API.")
+    try:
+        key = getpass.getpass("Paste the key (it is not shown), or press Enter for the basic video without AI: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        raise SystemExit("Stopped. Nothing was made or published.")
+    if key and ask("Save it in .env in this folder for next time? The file is ignored by git. [y/N] ").lower() in ("y", "yes"):
+        with open(str(env), "a", encoding="utf-8") as f:
+            f.write("ANTHROPIC_API_KEY=%s\n" % key)
+    return key
+
+
+def produce(storyboard, vid, voice):
+    """Storyboard -> out/<vid>.mp4 and out/<vid>.txt. -> (video, text file)"""
+    from toolkit import material, scenes
     sys.path.insert(0, str(ROOT / "video"))
     import build as video_build
+    build_dir = ROOT / "video" / "build"
+    clips = material.clips_in(storyboard, build_dir / vid / "footage")
+    made = scenes.render(storyboard, vid, clips)
+    (build_dir / (vid + "_script.json")).write_text(
+        json.dumps({"segments": made["segments"], "cues": made["cues"], "music": made["music"]}, indent=1), encoding="utf-8")
+    (build_dir / (vid + ".html")).write_text(made["html"], encoding="utf-8")
+    text_file = ROOT / "out" / (vid + ".txt")
+    text_file.parent.mkdir(exist_ok=True)
+    text_file.write_text(storyboard["caption"].strip() + "\n", encoding="utf-8")
+    print("\nMaking the video (a minute or two)...", flush=True)
+    try:
+        video = video_build.build(vid, voice)
+    except subprocess.CalledProcessError:
+        raise SystemExit("The video could not be built. The messages above say which step failed.")
+    print("\n" + "=" * 72 + "\n" + storyboard["caption"].strip() + "\n" + "=" * 72)
+    print("Video: %s\nText:  %s" % (video, text_file))
+    show(video)
+    return video, text_file
 
+
+def from_story(args):
+    """--story FILE: build the video from a storyboard somebody wrote (an agent, or you). Opens no browser."""
+    from toolkit import scenes, story
+    path = pathlib.Path(args.story).expanduser().resolve()
+    try:
+        storyboard = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as err:
+        raise SystemExit("Could not read the storyboard %s: %s" % (path, err))
+    if not isinstance(storyboard, dict) or "/" not in str(storyboard.get("repo") or ""):
+        raise SystemExit('The storyboard needs "repo": "owner/name", as in the brief.')
+    vid = story.vid_for(storyboard["repo"])
+    problems = scenes.check(storyboard, ROOT / "video" / "build" / vid / "footage")
+    if problems:
+        raise SystemExit("The storyboard cannot be built yet:\n  - " + "\n  - ".join(problems))
+    video, text_file = produce(storyboard, vid, args.voice)
+    if args.no_post:
+        print("\nLinkedIn was not opened (--no-post). To put these two files into a LinkedIn post:\n"
+              "  python run.py --post %s %s" % (os.path.relpath(str(video)), os.path.relpath(str(text_file))))
+        return 0
+    return hand_over(args, video, text_file)
+
+
+def flow(args):
+    from toolkit import browser, github, linkedin, material, scenes, story, writer
+
+    if args.story:
+        return from_story(args)
+    person = sys.stdin.isatty()   # False when an agent or a script runs this: then nothing is decided for the user
+    if args.post:                                       # put files you already have into a LinkedIn post
+        return hand_over(args, *(pathlib.Path(p).expanduser().resolve() for p in args.post))
     session = browser.open_session(args.browser)
     try:
         print("Browser: %s (%s)" % (session.label, "its own profile, kept in .browser/" if session.own_profile
                                      else "the one you already use"), flush=True)
-
-        if args.post:                                   # publish files you already have
-            video, text_file = (pathlib.Path(p).expanduser().resolve() for p in args.post)
-            linkedin.ensure_signed_in(session)
-            return publish(session, video, text_file, args.dry_run)
-
         print("\nChecking your sign-ins...", flush=True)
         user = github.ensure_signed_in(session)
-        if not args.no_post:
-            linkedin.ensure_signed_in(session)
+        if not (args.no_post or args.brief or args.list):   # LinkedIn is checked in the browser that will fill in the post
+            poster = poster_session(args, session)
+            if poster is None:
+                print("LinkedIn: will be checked in the browser you choose for the post")
+            else:
+                try:
+                    linkedin.ensure_signed_in(poster)
+                finally:
+                    if poster is not session:
+                        poster.close()
 
         full, row = args.repo, None
         if args.list or not full:
             repos = github.list_repos(session, user)
             print_repos(repos, user)
-            if args.list:
+            if args.list or not person:
+                if not person:
+                    print("\nNEXT STEP, IF YOU ARE AN AGENT: ask the user which of these repositories the post is about, and wait for\n"
+                          "their answer. Do not choose one for them, and do not make a video before they have chosen. Then:\n"
+                          "  python run.py --repo OWNER/NAME --brief        (the whole procedure is in AGENTS.md)")
                 return 0
             full, row = pick_repo(repos)
 
+        # Nothing below this line happens before a repository has been chosen.
         print("\nReading %s..." % full, flush=True)
         facts = github.repo_facts(session, full, row)
         if facts["private"]:
             print("\n%s is a PRIVATE repository. The video and the post will show its name, its description and lines\n"
-                  "from its README to everyone who sees the post." % facts["full"])
-            if not sys.stdin.isatty() or ask("Go on? Type yes to continue: ").lower() not in ("y", "yes"):
+                  "from its README to everyone who sees the post. With an API key, its README text and pictures are also sent to\n"
+                  "Anthropic's API to write the script (use --basic to avoid that)." % facts["full"])
+            if person and ask("Go on? Type yes to continue: ").lower() not in ("y", "yes"):
                 raise SystemExit("Stopped. Nothing was made or published.")
+        vid = story.vid_for(facts["full"])
+        folder = ROOT / "video" / "build" / vid
+        print("Collecting footage of the product...", flush=True)
+        brief = material.gather(facts, folder)
+        print("  %d footage file(s) in %s" % (len(brief["footage"]), os.path.relpath(str(folder / "footage"))))
 
-        made = story.make(facts)
-        vid = made["vid"]
-        build_dir = ROOT / "video" / "build"
-        build_dir.mkdir(exist_ok=True)
-        (build_dir / (vid + "_script.json")).write_text(
-            json.dumps({"segments": made["segments"], "cues": made["cues"], "music": made["music"]}, indent=1), encoding="utf-8")
-        (build_dir / (vid + ".html")).write_text(made["html"], encoding="utf-8")
-        text_file = ROOT / "out" / (vid + ".txt")
-        text_file.parent.mkdir(exist_ok=True)
-        text_file.write_text(made["post"], encoding="utf-8")
+        if args.basic:
+            storyboard = story.draft(facts)
+        else:
+            key = "" if args.brief else api_key()
+            if not key and (args.brief or not person):   # an agent writes the storyboard itself
+                print("\nBrief:   %s\nFootage: %s" % (os.path.relpath(str(folder / "brief.json")), os.path.relpath(str(folder / "footage"))))
+                print("\nNo video was made. NEXT STEP, IF YOU ARE AN AGENT: read the brief, look at the footage, write the storyboard to\n"
+                      "  %s\nas described in AGENTS.md, then run:\n  python run.py --story %s"
+                      % (os.path.relpath(str(folder / "story.json")), os.path.relpath(str(folder / "story.json"))))
+                return 0
+            storyboard = None
+            if key:
+                print("Writing the video and the post with Claude (%s)..." % writer.MODEL, flush=True)
+                try:
+                    storyboard = writer.write(brief, folder / "footage", api_key=key)
+                except writer.WriterError as err:
+                    print("  The AI writer did not work: %s.\n  Making the basic version instead." % err)
+            storyboard = storyboard or story.draft(facts)
+        (folder / "story.json").write_text(json.dumps(storyboard, indent=1, ensure_ascii=False), encoding="utf-8")
+        problems = scenes.check(storyboard, folder / "footage")
+        if problems:
+            raise SystemExit("The storyboard cannot be built:\n  - " + "\n  - ".join(problems))
 
-        print("\nMaking the video (about a minute)...", flush=True)
-        try:
-            video = video_build.build(vid, args.voice)
-        except subprocess.CalledProcessError:
-            raise SystemExit("The video could not be built. The messages above say which step failed.")
-
-        print("\n" + "=" * 72 + "\n" + made["post"] + "=" * 72)
-        print("Video: %s\nText:  %s" % (video, text_file))
-        show(video)
-        again = "python run.py --post %s %s" % (os.path.relpath(str(video)), os.path.relpath(str(text_file)))
+        video, text_file = produce(storyboard, vid, args.voice)
         if args.no_post:
-            print("\nNot published (--no-post). To publish these two files later:\n  " + again)
+            print("\nLinkedIn was not opened (--no-post). To put these two files into a LinkedIn post later:\n"
+                  "  python run.py --post %s %s" % (os.path.relpath(str(video)), os.path.relpath(str(text_file))))
             return 0
-        if not args.dry_run:
-            if not sys.stdin.isatty():
-                print("\nNot published: there is nobody to ask. To publish these two files:\n  " + again)
-                return 0
-            print("\nThis is exactly what will be posted to your LinkedIn profile. Watch the video and read the text.\n"
-                  "To change the wording, edit the text file and save it before you answer.")
-            if ask("Publish it now? Type yes to publish, anything else to stop: ").lower() not in ("y", "yes"):
-                print("Not published. To publish these two files later:\n  " + again)
-                return 0
-        return publish(session, video, text_file, args.dry_run)
     finally:
         session.close()
+    return hand_over(args, video, text_file)
 
 
 def main():
@@ -237,14 +356,20 @@ def main():
                                           "your default browser if left out")
     parser.add_argument("--repo", metavar="OWNER/NAME", help="the repository to post about")
     parser.add_argument("--list", action="store_true", help="check the sign-ins, list your repositories and stop")
-    parser.add_argument("--no-post", action="store_true", help="make the video and the text, do not publish")
-    parser.add_argument("--dry-run", action="store_true", help="fill in the LinkedIn post but do not press Post")
-    parser.add_argument("--post", nargs=2, metavar=("VIDEO", "TEXT"), help="publish a video and a text file you already have")
+    parser.add_argument("--no-post", action="store_true", help="make the video and the text, do not open LinkedIn")
+    parser.add_argument("--post-with", metavar="BROWSER", help="the browser that fills in the LinkedIn post: chrome, safari, edge, firefox or a path "
+                                                                 "(asked once when your default browser is Safari)")
+    parser.add_argument("--press-post", action="store_true", help="also press Post, instead of leaving that to you")
+    parser.add_argument("--dry-run", action="store_true", help=argparse.SUPPRESS)   # the old name of what is now the normal behaviour
+    parser.add_argument("--post", nargs=2, metavar=("VIDEO", "TEXT"), help="put a video and a text file you already have into a LinkedIn post")
+    parser.add_argument("--basic", action="store_true", help="make the simple video from a fixed template, without AI")
+    parser.add_argument("--brief", action="store_true", help="with --repo: collect the facts and the footage for a writer and stop (for agents)")
+    parser.add_argument("--story", metavar="FILE", help="build the video from a storyboard file (for agents; see AGENTS.md)")
     parser.add_argument("--voice", default="am_michael", help="Kokoro voice, for example am_michael, af_heart, bf_emma")
     parser.add_argument("--setup", action="store_true", help="install everything and stop")
     args = parser.parse_args()
 
-    for f in args.post or []:
+    for f in (args.post or []) + ([args.story] if args.story else []):
         if not pathlib.Path(f).expanduser().is_file():
             sys.exit("No such file: %s" % f)
     setup()

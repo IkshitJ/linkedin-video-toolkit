@@ -45,7 +45,8 @@ def parse_repo_list(html, base=SITE):
 
 
 def parse_repo_page(html):
-    """-> {"missing": bool, "description": str, "readme": [{"tag", "text", "sec"}, ...]} from a repository's front page."""
+    """-> {"missing", "description", "readme": [{"tag", "text", "sec"}, ...], "code": [str], "images": [{"src", "alt"}]}
+    from a repository's front page. code: the README's code blocks. images: the pictures in the README."""
     title = re.search(r"<title>(.*?)</title>", html or "", re.S)
     title = entities.unescape(re.sub(r"\s+", " ", title.group(1)).strip()) if title else ""
     about = re.match(r"(?:GitHub - )?[\w.-]+/[\w.-]+: (.*?)(?: · GitHub)?$", title)
@@ -62,7 +63,10 @@ def parse_repo_page(html):
             items.append({"tag": el.tag, "text": text[:400], "sec": "" if el.tag[0] == "h" else heading})
         if len(items) >= 150:
             break
-    return {"missing": "Page not found" in title, "description": about.group(1) if about else "", "readme": items}
+    code = [c for c in (pre.text()[:700] for pre in article.find_all(lambda n: n.tag == "pre")) if c][:10] if article else []
+    images = [{"src": urljoin(SITE, img.get("src") or img.get("data-canonical-src")), "alt": img.get("alt")}
+              for img in (article.find_all(lambda n: n.tag == "img" and (n.get("src") or n.get("data-canonical-src"))) if article else [])]
+    return {"missing": "Page not found" in title, "description": about.group(1) if about else "", "readme": items, "code": code, "images": images}
 
 
 # ---- talking to GitHub ------------------------------------------------------------------------
@@ -115,17 +119,19 @@ def repo_facts(session, full, row=None):
         raise SystemExit("Write the repository as owner/name, for example octocat/Hello-World.")
     row = row or {}
     facts = {"full": full, "description": row.get("description", ""), "private": bool(row.get("private")), "stars": None,
-             "forks": None, "languages": [[row["language"], None]] if row.get("language") else [], "topics": [], "readme": []}
+             "forks": None, "languages": [[row["language"], None]] if row.get("language") else [], "topics": [], "readme": [],
+             "homepage": "", "code": [], "images": []}
     seen = parse_repo_page(session.fetch("%s/%s" % (SITE, full), wait_for="article.markdown-body")[1])
     if seen["missing"]:
         raise SystemExit("There is no repository %s, or the signed-in account cannot see it." % full)
-    facts["readme"] = seen["readme"]
+    facts.update(readme=seen["readme"], code=seen["code"], images=seen["images"])
     facts["description"] = facts["description"] or seen["description"]
 
     info = {} if facts["private"] else _api("/repos/" + full)   # stars, topics and the language split, for public ones
     if "full_name" in info:
         facts.update(full=info["full_name"], description=info.get("description") or facts["description"], private=bool(info.get("private")),
-                     stars=info.get("stargazers_count"), forks=info.get("forks_count"), topics=info.get("topics") or [])
+                     stars=info.get("stargazers_count"), forks=info.get("forks_count"), topics=info.get("topics") or [],
+                     homepage=info.get("homepage") or "")
         sizes = _api("/repos/%s/languages" % full)
         total = 0 if "_status" in sizes else sum(sizes.values())
         if total:

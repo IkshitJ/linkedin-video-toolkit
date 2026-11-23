@@ -44,7 +44,7 @@ class Node:
                 elif child.tag not in UNSEEN and child.tag not in skip:
                     collect(child)
         collect(self)
-        return re.sub(r"\s+", " ", "".join(parts)).strip()
+        return re.sub(r"[ \t]+", " ", "".join(parts)).strip() if self.tag == "pre" else re.sub(r"\s+", " ", "".join(parts)).strip()
 
 
 class _Builder(HTMLParser):

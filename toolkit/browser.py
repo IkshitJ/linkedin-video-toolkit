@@ -126,6 +126,21 @@ class Window:
         say("  Do not use the browser window until this finishes.")
         return linkedin.post(self.page, video, pathlib.Path(text_file).read_text(encoding="utf-8"), publish=publish, say=say)
 
+    def wait_for_post(self, minutes=30):
+        """Keep the window open until you have pressed Post (or closed the window). -> exit code"""
+        import re, time
+        print("This window stays open for %d minutes, or until you post or close it." % minutes, flush=True)
+        end = time.time() + minutes * 60
+        try:
+            while time.time() < end:
+                if self.page.get_by_text(re.compile("post successful", re.I)).first.is_visible():
+                    print("\nPOSTED: your post is live on LinkedIn.")
+                    return 0
+                self.page.wait_for_timeout(1500)
+        except Exception:
+            pass   # the window was closed
+        return 0
+
     def close(self):
         for stop in (self.context.close, self.playwright.stop):
             try:
@@ -150,6 +165,52 @@ def open_session(choice=None, say=print):
         playwright.stop()
         raise
     return Window(playwright, context, label)
+
+
+CHOICE = PROFILES / "post-with.txt"
+
+
+def poster_choice(post_with=None, browser=None, ask=None, say=print):
+    """Which browser fills in the LinkedIn post: 'safari', 'chrome', 'edge', 'firefox', a path, or None when
+    it has to be asked and there is nobody to ask. Only a question when the default browser is Safari:
+    Safari can only be driven by taking over the keyboard and mouse, the others work in their own window.
+    The answer is remembered in .browser/post-with.txt; delete that file to be asked again."""
+    if post_with:           # --post-with: use it, and remember it where the question would otherwise come back
+        if default_browser() == "safari":
+            PROFILES.mkdir(exist_ok=True)
+            CHOICE.write_text(post_with + "\n", encoding="utf-8")
+        return post_with
+    if browser:             # --browser: one browser for everything
+        return browser
+    if default_browser() != "safari":
+        return order()[0]
+    if CHOICE.exists() and CHOICE.read_text(encoding="utf-8").strip():
+        return CHOICE.read_text(encoding="utf-8").strip()
+    if ask is None:
+        return None
+    say("\nYour default browser is Safari. The LinkedIn post can be filled in in two ways:\n"
+        "  1  Chrome, in the background. It works in its own Chrome window while you keep using the keyboard and mouse.\n"
+        "     You sign in to LinkedIn once in that window; it is remembered after that.\n"
+        "  2  Safari. It uses the LinkedIn you are already signed in to, but it takes over the keyboard and mouse for\n"
+        "     one to three minutes, and you must not touch them until it says READY.\n"
+        "  3  Another browser (Edge, Firefox, Brave ...), also in its own window in the background.")
+    while True:
+        answer = ask("Which one? Type 1, 2 or 3: ").strip().lower()
+        choice = {"1": "chrome", "chrome": "chrome", "2": "safari", "safari": "safari"}.get(answer)
+        if answer in ("3", "other"):
+            choice = ask("Which browser? Type edge, firefox, chromium, or the full path of a browser: ").strip()
+        if choice:
+            PROFILES.mkdir(exist_ok=True)
+            CHOICE.write_text(choice + "\n", encoding="utf-8")
+            say("Remembered. To be asked again, delete .browser/%s." % CHOICE.name)
+            return choice
+
+
+POSTER_HELP = ("ASK THE USER how the LinkedIn post should be filled in, because their default browser is Safari:\n"
+               "  chrome  - in the background, in its own Chrome window; they keep the keyboard and mouse, and sign in to LinkedIn once there\n"
+               "  safari  - uses their existing sign-in, but takes over the keyboard and mouse for one to three minutes\n"
+               "  edge, firefox or a browser path - like chrome, with that browser\n"
+               "Then pass their answer as --post-with NAME. It is remembered for the next run.")
 
 
 def open_profile(pw, names, say=print):
@@ -185,6 +246,20 @@ def open_profile(pw, names, say=print):
                 break
     raise SystemExit("Could not start a browser.\n  " + "\n  ".join(errors) +
                      "\nIf a window from an earlier run is still open, close it. Otherwise install Chrome or Edge, or pass --browser.")
+
+
+def launch_renderer_sync(pw, args=(), say=print):
+    """launch_renderer() for Playwright's sync API (screenshots of public pages)."""
+    last = None
+    for channel in ("chrome", "msedge", None):
+        try:
+            return pw.chromium.launch(headless=True, args=list(args), **({"channel": channel} if channel else {}))
+        except Exception as err:
+            last = err
+    if _not_installed(last):
+        _download("chromium", say)
+        return pw.chromium.launch(headless=True, args=list(args))
+    raise last
 
 
 async def launch_renderer(pw, args=(), say=print):

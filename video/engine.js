@@ -11,7 +11,7 @@
     if (m) return sc.phrases[+m[1]].t0 + (m[2] ? parseFloat(m[2]) : 0);
     return sc.t0 + parseFloat(spec);
   };
-  const items = [];
+  const items = [], loading = [];
   scenes.forEach((sc) => {
     if (!sc.el) throw new Error("missing scene " + sc.id);
     sc.el.querySelectorAll("[data-at]").forEach((el) => {
@@ -20,6 +20,12 @@
         count: d.count ? d.count.split(",") : null, type: d.type != null ? el.textContent : null, bar: d.bar ? parseFloat(d.bar) : null });
     });
     sc.kb = [...sc.el.querySelectorAll("[data-kb]")];
+    sc.pan = [...sc.el.querySelectorAll("img[data-pan]")];   // a still: scrolls if it is taller than its frame, else zooms slowly
+    sc.seq = [...sc.el.querySelectorAll("canvas[data-seq]")].map((cv) => {   // a recording: "folder,frames,fps"
+      const [dir, n, fps] = cv.dataset.seq.split(",");
+      const frames = Array.from({ length: +n }, (_, i) => { const im = new Image(); im.src = dir + "/" + String(i + 1).padStart(4, "0") + ".jpg"; loading.push(im); return im; });
+      return { cv, frames, fps: +fps, ctx: cv.getContext("2d"), shown: -1 };
+    });
     sc.hot = [...sc.el.querySelectorAll("[data-on]")].map((el) => ({ el, on: when(sc, el.dataset.on), off: el.dataset.off ? when(sc, el.dataset.off) : sc.t1 + 1 }));
     if (window.SHORTCAPS) sc.phrases.forEach((p) => {   // short caption chunks, timed by character share
       const words = p.cap.split(" "), groups = []; let g = [];
@@ -42,6 +48,17 @@
       sc.el.style.transform = `scale(${1 + 0.025 * (1 - ease(a))})`;
       const k = clamp((t - sc.t0) / (sc.t1 - sc.t0));
       sc.kb.forEach((el) => { el.style.transform = `scale(${1.02 + 0.07 * k})`; });
+      if (o > 0) {
+        sc.pan.forEach((el) => {
+          const box = el.parentElement, w = box.clientWidth, h = box.clientHeight, full = el.naturalWidth ? w * el.naturalHeight / el.naturalWidth : h;
+          if (full > h * 1.15) { el.style.height = "auto"; el.style.objectFit = "fill"; el.style.transformOrigin = "top"; el.style.transform = `translateY(${-Math.min(full - h, 240 * (sc.t1 - sc.t0)) * clamp((k - 0.08) / 0.84)}px)`; }
+          else { el.style.objectFit = full < h * 0.8 ? "contain" : "cover"; el.style.transform = `scale(${1.0 + 0.05 * k})`; }
+        });
+        sc.seq.forEach((q) => {
+          const i = Math.max(0, Math.min(q.frames.length - 1, Math.floor((t - sc.t0) * q.fps))), im = q.frames[i];
+          if (i !== q.shown && im.complete && im.naturalWidth) { q.ctx.drawImage(im, 0, 0, q.cv.width, q.cv.height); q.shown = i; }
+        });
+      }
       sc.hot.forEach((h) => h.el.classList.toggle("hot", t >= h.on && t < h.off));
     });
     items.forEach((it) => {
@@ -87,5 +104,5 @@
   if (q.has("t")) window.seek(parseFloat(q.get("t")));
   else if (q.has("play")) { const t0 = performance.now(); (function f() { window.seek(((performance.now() - t0) / 1000) % D); requestAnimationFrame(f); })(); }
   else window.seek(0);
-  window.READY = Promise.all([...document.images].map((im) => im.decode().catch(() => 0)));
+  window.READY = Promise.all([...document.images, ...loading].map((im) => im.decode().catch(() => 0)));
 })();

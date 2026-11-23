@@ -4,6 +4,7 @@ kokoro-onnx==0.6.1
 soundfile==0.14.0
 numpy==2.5.5
 scipy==1.18.1
+anthropic==2.12.0
 pyobjc-framework-ApplicationServices==13.0; sys_platform == "darwin"
 pyobjc-framework-Quartz==13.0; sys_platform == "darwin"
 pyobjc-framework-Cocoa==13.0; sys_platform == "darwin"

@@ -19,7 +19,7 @@ LIST = HEAD % ("ada", "ada (Ada) / Repositories") + """
 </ul><a class="next_page" rel="next" href="/ada?page=2&amp;tab=repositories">Next</a></div></body></html>"""
 REPO = HEAD % ("ada", "GitHub - ada/weather-cli: A tiny weather report · GitHub") + """
 <article class="markdown-body entry-content"><h1>weather-cli</h1>
-<p><img src="badge.svg" alt="build passing"> </p>
+<p><img src="badge.svg" alt="build passing"> <img src="https://x.test/shot.png" alt="The app"> </p>
 <p>Weather for your terminal, <code>fast</code>.</p>
 <h2>Features</h2>
 <ul><li>Shows today and tomorrow<ul><li>nested detail</li></ul></li><li>Works offline <svg><title>icon</title></svg></li></ul>
@@ -70,6 +70,8 @@ class Pages(unittest.TestCase):
             {"tag": "li", "text": "nested detail", "sec": "Features"},
             {"tag": "li", "text": "Works offline", "sec": "Features"},
             {"tag": "h2", "text": "Install", "sec": ""}])
+        self.assertEqual(page["code"], ["pip install weather-cli"])
+        self.assertEqual(page["images"], [{"src": "https://github.com/badge.svg", "alt": "build passing"}, {"src": "https://x.test/shot.png", "alt": "The app"}])
 
     def test_titles_with_and_without_a_description_or_a_sign_in(self):
         for title, want in (("ada/weather-cli: Fast: and small", "Fast: and small"), ("GitHub - ada/weather-cli · GitHub", ""), ("ada/weather-cli", "")):
@@ -118,9 +120,10 @@ class Facts(unittest.TestCase):
 
     def test_public_repository(self):
         github._api = lambda path: {"Python": 900, "Shell": 100} if path.endswith("/languages") else {
-            "full_name": "ada/weather-cli", "description": "A tiny weather report", "private": False, "stargazers_count": 42, "forks_count": 3, "topics": ["cli"]}
+            "full_name": "ada/weather-cli", "description": "A tiny weather report", "private": False, "stargazers_count": 42, "forks_count": 3, "topics": ["cli"], "homepage": "https://weather.test"}
         facts = github.repo_facts(Session({"https://github.com/ada/weather-cli": ("x", REPO)}), "ada/weather-cli")
         self.assertEqual((facts["stars"], facts["forks"], facts["topics"], facts["private"]), (42, 3, ["cli"], False))
+        self.assertEqual((facts["homepage"], facts["code"], len(facts["images"])), ("https://weather.test", ["pip install weather-cli"], 2))
         self.assertEqual(facts["languages"], [["Python", 90.0], ["Shell", 10.0]])
         self.assertEqual(len(facts["readme"]), 7)
 
@@ -147,6 +150,26 @@ class Browsers(unittest.TestCase):
                                  ("com.apple.Safari", "/x/Safari", "safari"), ("com.google.Chrome", "/x/Google Chrome", "chrome"),
                                  ("BraveHTML", "C:/brave.exe", "C:/brave.exe"), ("firefox.desktop", "", "firefox"), ("unknown.desktop", "", None)):
             self.assertEqual(browser.name_of(text, path), want, text)
+
+    def test_the_browser_for_the_linkedin_post_is_asked_once_when_the_default_is_safari(self):
+        import tempfile
+        real = browser.default_browser, browser.CHOICE, browser.PROFILES
+        self.addCleanup(lambda: (setattr(browser, "default_browser", real[0]), setattr(browser, "CHOICE", real[1]), setattr(browser, "PROFILES", real[2])))
+        browser.PROFILES = pathlib.Path(tempfile.mkdtemp())
+        browser.CHOICE = browser.PROFILES / "post-with.txt"
+        quiet = lambda *a: None
+        browser.default_browser = lambda: "edge"
+        self.assertEqual(browser.poster_choice(say=quiet), "edge")                       # not Safari: no question
+        browser.default_browser = lambda: "safari"
+        self.assertIsNone(browser.poster_choice(say=quiet))                              # nobody to ask
+        self.assertEqual(browser.poster_choice(browser="firefox", say=quiet), "firefox")  # --browser decides everything
+        answers = iter(["x", "3", "edge"])
+        self.assertEqual(browser.poster_choice(ask=lambda q: next(answers), say=quiet), "edge")
+        self.assertEqual(browser.poster_choice(say=quiet), "edge")                       # remembered, not asked again
+        self.assertEqual(browser.poster_choice(post_with="safari", say=quiet), "safari")
+        self.assertEqual(browser.poster_choice(say=quiet), "safari")                     # --post-with is remembered too
+        browser.CHOICE.unlink()
+        self.assertEqual(browser.poster_choice(ask=lambda q: "1", say=quiet), "chrome")
 
     def test_an_explicit_choice_wins_and_the_default_browser_comes_first(self):
         self.assertEqual(browser.order("edge"), ["edge"])
