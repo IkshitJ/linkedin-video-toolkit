@@ -309,6 +309,3 @@ setup.sh               the same as: python run.py --setup
 
 Created on your machine and ignored by git: `.venv/`, `.browser/`, `video/tts/`, `video/build/`, `out/`, `repos/`.
 
-## Licence
-
-MIT. See [LICENSE](LICENSE). The Kokoro voice model downloaded by `setup` has its own licence (Apache 2.0).
