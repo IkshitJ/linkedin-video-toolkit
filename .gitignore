@@ -1,0 +1,17 @@
+# Local environment and downloaded models
+.venv/
+video/tts/
+__pycache__/
+.DS_Store
+
+# The browser profile run.py signs in with. It holds your sign-in sessions: never commit it.
+.browser/
+
+# Everything you produce: videos, post texts, cloned projects. Keep these out of a public repo.
+out/
+repos/
+video/build/
+
+# Never commit credentials
+.env
+*.pem

@@ -1,0 +1,50 @@
+<!doctype html><html><head><meta charset="utf-8">
+<meta name="video-size" content="1920x1080">
+<link rel="stylesheet" href="style.css"></head><body>
+<!-- One <section class="scene" id="s-NAME"> per segment in script_data.py, in the same order.
+     data-at  when the element appears: "p1" = when phrase 1 of this scene starts, "p1+0.4" = 0.4 s later,
+              "0.3" = 0.3 s after the scene starts
+     data-fx  how it appears: up (default), left, right, pop, stamp, fade
+     data-count="from,to,prefix,suffix"  counts a number up   data-bar="88"  grows a bar to 88 %
+     data-type  types the text out   -->
+<div id="stage">
+<div class="blob" id="b1"></div><div class="blob" id="b2"></div><div class="blob" id="b3"></div><div id="grid"></div>
+
+<section class="scene" id="s-hook">
+  <div class="tag" data-at="0.3" data-fx="fade">Example video</div>
+  <h1 data-at="p0">This video was made<br>entirely with <span class="f">code</span>.</h1>
+  <h2 data-at="p1" class="d" style="margin-top:56px">No camera. No editing software.</h2>
+</section>
+
+<section class="scene" id="s-how">
+  <h2 data-at="p0">How it works</h2>
+  <div class="row" style="margin-top:64px;align-items:center;gap:30px">
+    <div class="card col node" data-at="p1" data-fx="left"><span class="num f">1</span><h3>Script</h3><div class="sub">narration<br>as plain text</div></div>
+    <div class="arrow" data-at="p2-0.2" data-fx="fade">→</div>
+    <div class="card col node" data-at="p2" data-fx="pop"><span class="num m">2</span><h3>Voice</h3><div class="sub">a local model<br>reads it aloud</div></div>
+    <div class="arrow" data-at="p3-0.2" data-fx="fade">→</div>
+    <div class="card col node" data-at="p3" data-fx="right"><span class="num l">3</span><h3>Scenes</h3><div class="sub">web pages, timed<br>to the voice</div></div>
+  </div>
+</section>
+
+<section class="scene" id="s-data">
+  <div class="row" style="align-items:baseline;gap:30px" data-at="p0">
+    <span class="huge f" data-at="p0" data-count="0,30,," data-cdur="1">0</span><span class="sub" style="font-size:54px">frames per second</span>
+  </div>
+  <div class="col" style="margin-top:56px;gap:30px">
+    <div class="barrow" data-at="p1" data-fx="fade"><div class="name">Numbers</div><div class="track"><div class="bar" style="background:var(--fable)" data-at="p1" data-bar="64"></div></div><div class="val" data-at="p1" data-count="0,64,,%" data-cdur="1.1">0%</div></div>
+    <div class="barrow" data-at="p1+0.9" data-fx="fade"><div class="name">Bars</div><div class="track"><div class="bar" style="background:var(--local)" data-at="p1+0.9" data-bar="92"></div></div><div class="val l" data-at="p1+0.9" data-count="0,92,,%" data-cdur="1.1">0%</div></div>
+  </div>
+  <div style="margin-top:50px"><span class="pill g" style="font-size:40px;padding:14px 36px" data-at="p2" data-fx="pop">Captions, timed to every phrase</span></div>
+</section>
+
+<section class="scene" id="s-close">
+  <h2 data-at="p0" class="d">Change the script. Run one command.</h2>
+  <h1 data-at="p1" data-fx="pop" style="margin-top:50px">Get a <span class="f">new video</span>.</h1>
+  <div style="margin-top:56px"><span class="pill mono" style="font-size:38px;padding:16px 38px" data-at="p1+0.8" data-fx="pop">video/build.sh example</span></div>
+</section>
+
+<div id="cap"><span></span></div><div id="prog"></div><div id="fade"></div>
+</div>
+<script src="build/example_timeline.js"></script><script src="engine.js"></script>
+</body></html>

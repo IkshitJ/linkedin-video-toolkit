@@ -1,0 +1,25 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Stand-in for the LinkedIn feed (tests only)</title></head><body>
+<!-- The same buttons, in the same order, that toolkit/linkedin.py presses on linkedin.com.
+     /mangle/feed/ changes the text after it is typed, /limit/feed/ refuses the post. -->
+<button id="start">Start a post</button>
+<button aria-label="Add media to nothing">decoy outside the post window</button>
+<div role="dialog" id="composer" hidden>
+  <div role="textbox" contenteditable="true" aria-label="Text editor for creating content" id="editor" style="min-height:80px;border:1px solid #888;white-space:pre-wrap"><p>an old draft</p></div>
+  <button aria-label="Add media" id="media">+</button>
+  <input type="file" id="file" hidden>
+  <button id="post" disabled>Post</button>
+</div>
+<div role="dialog" id="mediaeditor" hidden><button aria-label="video 0">thumbnail</button><button id="next" disabled>Next</button></div>
+<div id="toast"></div>
+<script>
+const $ = id => document.getElementById(id), mode = location.pathname.split('/')[1];
+window.fake = { posted: null, file: null };
+$('start').onclick = () => { $('composer').hidden = false; };
+$('media').onclick = () => $('file').click();
+$('file').onchange = e => { fake.file = e.target.files[0].name; $('composer').hidden = true; $('mediaeditor').hidden = false; setTimeout(() => { $('next').disabled = false; }, 700); };
+$('next').onclick = () => { $('mediaeditor').hidden = true; $('composer').hidden = false; setTimeout(() => { $('post').disabled = false; }, 500); };
+$('editor').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); document.execCommand('insertParagraph'); } });
+if (mode === 'mangle') $('editor').addEventListener('input', () => { const n = [...$('editor').querySelectorAll('*')].flatMap(x => [...x.childNodes]).find(x => x.nodeType === 3 && x.data.includes('Python')); if (n) n.data = n.data.replace('Python', 'Pyth0n'); });
+$('post').onclick = () => { if (mode === 'limit') { $('toast').textContent = 'You have reached the weekly posting limit.'; return; }
+  fake.posted = $('editor').innerText; $('composer').hidden = true; if (mode !== 'silent') setTimeout(() => { $('toast').textContent = 'Post successful.'; }, 600); };
+</script></body></html>
